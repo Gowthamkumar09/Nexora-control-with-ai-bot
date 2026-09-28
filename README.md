@@ -336,14 +336,4 @@ Planned improvements include:
 - Role-based access
 - Improved monitoring dashboard
 
-## Author
-
-**Gowtham Kumar**
-
-B.Tech — Artificial Intelligence & Machine Learning
-
-Sri Venkatesa Perumal College of Engineering & Technology
-
----
-
 **Nexora** is a personal project exploring AI-powered remote device management, cloud communication, intelligent automation, and AI-assisted system control.
