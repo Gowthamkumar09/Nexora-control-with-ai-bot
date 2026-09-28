@@ -21,7 +21,6 @@ Nexora allows a user to remotely monitor and control their Windows laptop from a
 - Cloud deployment support
 
 ## Architecture
-
 ```text
 Android App
      |
