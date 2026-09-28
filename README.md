@@ -1,2 +1,2 @@
-# remote-control-ai
+# Nexora-ai
 Cloud server for remote laptop control
