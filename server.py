@@ -188,8 +188,6 @@ async def laptop_websocket(
 
     await websocket.accept()
 
-    await websocket.accept()
-
     laptop_data = {
 
         "websocket":
