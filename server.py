@@ -24,10 +24,12 @@ HEARTBEAT_TIMEOUT = 15
 # ENVIRONMENT VARIABLES
 # ============================================================
 
-REMOTE_TOKEN = os.getenv(
-    "REMOTE_TOKEN",
-    "RC_AI_2026_Gowtham_7Kp9X4mQ2"
-).strip()
+REMOTE_TOKEN = os.getenv("REMOTE_TOKEN", "").strip()
+
+if not REMOTE_TOKEN:
+    raise RuntimeError(
+        "REMOTE_TOKEN must be configured before starting Nexora."
+    )
 
 GEMINI_API_KEY = os.getenv(
     "GEMINI_API_KEY",
