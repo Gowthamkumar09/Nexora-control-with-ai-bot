@@ -174,6 +174,19 @@ async def laptop_websocket(
     websocket: WebSocket,
     laptop_id: str
 ):
+    authorization = websocket.headers.get(
+        "authorization", ""
+    )
+    expected = f"Bearer {REMOTE_TOKEN}"
+
+    if not REMOTE_TOKEN or authorization != expected:
+        await websocket.close(
+            code=1008,
+            reason="Unauthorized"
+        )
+        return
+
+    await websocket.accept()
 
     await websocket.accept()
 
@@ -382,29 +395,23 @@ async def laptop_websocket(
 # GET LAPTOPS
 # ============================================================
 
+
 @app.get("/laptops")
-async def get_laptops():
+async def get_laptops(
+    authorization: str = Header(default="")
+):
+    check_token(authorization)
 
     result = {}
 
-    current_time = datetime.now(
-        timezone.utc
-    )
+    current_time = datetime.now(timezone.utc)
 
-    for laptop_id, laptop in (
-        connected_laptops.items()
-    ):
-
-        last_seen = laptop.get(
-            "last_seen"
-        )
+    for laptop_id, laptop in connected_laptops.items():
+        last_seen = laptop.get("last_seen")
 
         if last_seen is None:
-
             is_online = False
-
         else:
-
             seconds_since_heartbeat = (
                 current_time - last_seen
             ).total_seconds()
@@ -414,58 +421,31 @@ async def get_laptops():
                 <= HEARTBEAT_TIMEOUT
             )
 
-        laptop[
-            "status"
-        ] = (
-            "online"
-            if is_online
-            else "offline"
+        laptop["status"] = (
+            "online" if is_online else "offline"
         )
 
-        result[
-            laptop_id
-        ] = {
-
-            "status":
-                laptop["status"],
-
-            "last_seen":
-                (
-                    last_seen.isoformat()
-                    if last_seen
-                    else None
-                ),
-
-            "battery":
-                laptop.get("battery"),
-
-            "charging":
-                laptop.get("charging"),
-
-            "battery_time_minutes":
-                laptop.get(
-                    "battery_time_minutes"
-                ),
-
-            "cpu_usage":
-                laptop.get("cpu_usage"),
-
-            "ram_usage":
-                laptop.get("ram_usage"),
-
-            "hostname":
-                laptop.get("hostname"),
-
-            "windows_version":
-                laptop.get(
-                    "windows_version"
-                )
+        result[laptop_id] = {
+            "status": laptop["status"],
+            "last_seen": (
+                last_seen.isoformat()
+                if last_seen
+                else None
+            ),
+            "battery": laptop.get("battery"),
+            "charging": laptop.get("charging"),
+            "battery_time_minutes": laptop.get(
+                "battery_time_minutes"
+            ),
+            "cpu_usage": laptop.get("cpu_usage"),
+            "ram_usage": laptop.get("ram_usage"),
+            "hostname": laptop.get("hostname"),
+            "windows_version": laptop.get(
+                "windows_version"
+            )
         }
 
-    return JSONResponse(
-        content=result
-    )
-
+    return JSONResponse(content=result)
 
 # ============================================================
 # ALLOWED COMMANDS
