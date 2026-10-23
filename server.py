@@ -861,14 +861,15 @@ async def open_laptop_file(
             detail="Unexpected response from Windows agent",
         )
 
-   open_result_message = result.get(
-    "result",
-    "The Windows agent returned no message.",
-       )
+    open_result_message = result.get(
+        "result",
+        "The Windows agent returned no message.",
+    )
+
     return {
-    "success": open_result_message.startswith("Opened:"),
-    "message": open_result_message,
-        }
+        "success": open_result_message.startswith("Opened:"),
+        "message": open_result_message,
+    }
 
 # ============================================================
 # AI REQUEST
