@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Head
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from google import genai
-
+import secrets
 import asyncio
 import json
 import os
@@ -16,7 +16,53 @@ from datetime import datetime, timezone
 app = FastAPI(title="Remote Control AI")
 
 connected_laptops = {}
+# Pending confirmations: one-time tokens tied to exact commands.
+pending_confirmations = {}
 
+CONFIRMATION_TTL_SECONDS = 60
+DANGEROUS_COMMANDS = {"restart", "shutdown"}
+def create_confirmation(laptop_id: str, command: str) -> str:
+    """Create a one-time confirmation token for an exact command."""
+    now = datetime.now(timezone.utc).timestamp()
+
+    # Remove expired confirmations.
+    expired = [
+        token
+        for token, item in pending_confirmations.items()
+        if item["expires_at"] <= now
+    ]
+    for token in expired:
+        pending_confirmations.pop(token, None)
+
+    token = secrets.token_urlsafe(32)
+
+    pending_confirmations[token] = {
+        "laptop_id": laptop_id,
+        "command": command,
+        "expires_at": now + CONFIRMATION_TTL_SECONDS,
+    }
+
+    return token
+
+
+def consume_confirmation(
+    token: str,
+    laptop_id: str,
+    command: str,
+) -> bool:
+    """Validate and consume a token once, for its exact command."""
+    item = pending_confirmations.pop(token, None)
+
+    if item is None:
+        return False
+
+    now = datetime.now(timezone.utc).timestamp()
+
+    return (
+        item["laptop_id"] == laptop_id
+        and item["command"] == command
+        and item["expires_at"] > now
+    )
 HEARTBEAT_TIMEOUT = 15
 
 
@@ -605,23 +651,47 @@ async def send_command_to_laptop(
 # MANUAL COMMAND
 # ============================================================
 
-@app.post(
-    "/command/{laptop_id}"
-)
+
+@app.post("/command/{laptop_id}")
 async def send_command(
-
     laptop_id: str,
-
     command: dict,
-
-    authorization: str | None =
-        Header(default=None)
+    authorization: str | None = Header(default=None)
 ):
+    check_token(authorization)
 
-    print(
-        f"Command request received: "
-        f"{laptop_id}"
+    requested_command = command.get("command")
+
+    if not requested_command:
+        raise HTTPException(
+            status_code=400,
+            detail="Command is required"
+        )
+
+    if requested_command not in ALLOWED_COMMANDS:
+        raise HTTPException(
+            status_code=400,
+            detail="Command is not allowed"
+        )
+
+    if requested_command in DANGEROUS_COMMANDS:
+        confirmation_token = command.get("confirmation_token")
+
+        if not isinstance(confirmation_token, str) or not consume_confirmation(
+            confirmation_token,
+            laptop_id,
+            requested_command,
+        ):
+            raise HTTPException(
+                status_code=428,
+                detail="A valid, unexpired confirmation token is required"
+            )
+
+    return await send_command_to_laptop(
+        laptop_id,
+        requested_command
     )
+
 
     # --------------------------------------------------------
     # Authenticate
@@ -1043,27 +1113,33 @@ User message:
             }
 
         # ====================================================
+       
         # CONFIRMATION
         # ====================================================
 
         if result_type == "confirmation":
 
+            if command not in DANGEROUS_COMMANDS:
+                return {
+                    "success": True,
+                    "type": "chat",
+                    "command": None,
+                    "reply": "I can't request confirmation for that action.",
+                    "laptop": laptop_context
+                }
+
+            confirmation_token = create_confirmation(
+                "my-laptop",
+                command
+            )
+
             return {
-
-                "success":
-                    True,
-
-                "type":
-                    "confirmation",
-
-                "command":
-                    command,
-
-                "reply":
-                    message,
-
-                "laptop":
-                    laptop_context
+                "success": True,
+                "type": "confirmation",
+                "command": command,
+                "confirmation_token": confirmation_token,
+                "reply": message,
+                "laptop": laptop_context
             }
 
         # ====================================================
