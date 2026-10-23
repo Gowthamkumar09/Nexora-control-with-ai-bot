@@ -864,12 +864,12 @@ async def open_laptop_file(
    open_result_message = result.get(
     "result",
     "The Windows agent returned no message.",
-)
+    )
 
-return {
+    return {
     "success": open_result_message.startswith("Opened:"),
     "message": open_result_message,
-}
+    }
 
 # ============================================================
 # AI REQUEST
