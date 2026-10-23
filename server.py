@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from google import genai
 import secrets
 import asyncio
@@ -150,7 +150,7 @@ def check_token(
         f"Bearer {REMOTE_TOKEN}"
     )
 
-    if authorization != expected:
+    if not secrets.compare_digest(authorization, expected):
 
         print(
             "AUTH ERROR: Invalid token"
@@ -225,7 +225,10 @@ async def laptop_websocket(
     )
     expected = f"Bearer {REMOTE_TOKEN}"
 
-    if not REMOTE_TOKEN or authorization != expected:
+    if (
+        not REMOTE_TOKEN
+        or not secrets.compare_digest(authorization, expected)
+    ):
         await websocket.close(
             code=1008,
             reason="Unauthorized"
@@ -693,55 +696,15 @@ async def send_command(
     )
 
 
-    # --------------------------------------------------------
-    # Authenticate
-    # --------------------------------------------------------
 
-    check_token(
-        authorization
-    )
-
-    # --------------------------------------------------------
-    # Get command
-    # --------------------------------------------------------
-
-    requested_command = (
-        command.get("command")
-    )
-
-    if not requested_command:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Command is required"
-        )
-
-    print(
-        f"Requested command: "
-        f"{requested_command}"
-    )
-
-    # --------------------------------------------------------
-    # Send to laptop
-    # --------------------------------------------------------
-
-    return await send_command_to_laptop(
-
-        laptop_id,
-
-        requested_command
-    )
 
 
 # ============================================================
 # AI REQUEST
 # ============================================================
 
-class AIChatRequest(
-    BaseModel
-):
-
-    message: str
+class AIChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
 
 
 # ============================================================
@@ -908,6 +871,10 @@ async def ai_chat(
         authorization
     )
 
+    user_message = request.message.strip()
+    if not user_message:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
     # --------------------------------------------------------
     # Check AI
     # --------------------------------------------------------
@@ -1023,7 +990,7 @@ Current laptop information:
 
 User message:
 
-{request.message}
+{user_message}
 
 """
 
@@ -1038,9 +1005,12 @@ User message:
             )
         )
 
-        raw_reply = (
-            response.text.strip()
-        )
+        raw_reply = (response.text or "").strip()
+        if not raw_reply:
+            raise HTTPException(
+                status_code=502,
+                detail="AI returned an empty response"
+            )
 
         # ----------------------------------------------------
         # Remove Markdown code fences
@@ -1067,9 +1037,12 @@ User message:
         # Parse JSON
         # ----------------------------------------------------
 
-        ai_result = json.loads(
-            raw_reply
-        )
+        ai_result = json.loads(raw_reply)
+        if not isinstance(ai_result, dict):
+            raise HTTPException(
+                status_code=502,
+                detail="AI returned an invalid response format"
+            )
 
         result_type = ai_result.get(
             "type",
@@ -1080,13 +1053,10 @@ User message:
             "command"
         )
 
-        message = ai_result.get(
-
-            "message",
-
-            "I could not understand "
-            "that request."
-        )
+        message = ai_result.get("message", "I could not understand that request.")
+        if not isinstance(message, str):
+            message = "I could not understand that request."
+        message = message.strip() or "I could not understand that request."
 
         # ====================================================
         # CHAT
@@ -1128,6 +1098,15 @@ User message:
                     "laptop": laptop_context
                 }
 
+            if laptop_context.get("status") != "Online":
+                return {
+                    "success": True,
+                    "type": "chat",
+                    "command": None,
+                    "reply": "Your laptop is offline, so I can't confirm or send that action right now.",
+                    "laptop": laptop_context
+                }
+
             confirmation_token = create_confirmation(
                 "my-laptop",
                 command
@@ -1138,6 +1117,7 @@ User message:
                 "type": "confirmation",
                 "command": command,
                 "confirmation_token": confirmation_token,
+                "expires_in_seconds": CONFIRMATION_TTL_SECONDS,
                 "reply": message,
                 "laptop": laptop_context
             }
@@ -1176,10 +1156,21 @@ User message:
             # Restart / shutdown protection
             # ------------------------------------------------
 
-            if command in {
-                "restart",
-                "shutdown"
-            }:
+            if command in DANGEROUS_COMMANDS:
+
+                if laptop_context.get("status") != "Online":
+                    return {
+                        "success": True,
+                        "type": "chat",
+                        "command": None,
+                        "reply": "Your laptop is offline, so I can't send that action right now.",
+                        "laptop": laptop_context
+                    }
+
+                confirmation_token = create_confirmation(
+                    "my-laptop",
+                    command
+                )
 
                 return {
 
@@ -1192,12 +1183,21 @@ User message:
                     "command":
                         command,
 
+                    "confirmation_token":
+                        confirmation_token,
+
+                    "expires_in_seconds":
+                        CONFIRMATION_TTL_SECONDS,
+
                     "reply":
                         (
                             "Please confirm "
                             "before executing "
                             f"{command}."
-                        )
+                        ),
+
+                    "laptop":
+                        laptop_context
                 }
 
             # ------------------------------------------------
