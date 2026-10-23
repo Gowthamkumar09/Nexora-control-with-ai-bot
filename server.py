@@ -7,6 +7,8 @@ import asyncio
 import json
 import os
 from datetime import datetime, timezone
+import uuid
+from typing import Any
 
 
 
@@ -16,6 +18,10 @@ from datetime import datetime, timezone
 app = FastAPI(title="Remote Control AI")
 
 connected_laptops = {}
+# Pending file requests waiting for a response from the Windows agent.
+pending_file_requests: dict[str, asyncio.Future] = {}
+
+FILE_REQUEST_TIMEOUT_SECONDS = 20
 # Pending confirmations: one-time tokens tied to exact commands.
 pending_confirmations = {}
 
@@ -384,6 +390,26 @@ async def laptop_websocket(
                 )
 
             # =================================================
+            # FILE OPERATION RESULTS
+            # =================================================
+
+            elif data.get("type") in {
+                "file_search_result",
+                "file_open_result",
+            }:
+                request_id = data.get("request_id")
+                future = pending_file_requests.get(request_id)
+
+                if future is not None and not future.done():
+                    future.set_result(data)
+
+                else:
+                    print(
+                        f"Ignoring unmatched file response "
+                        f"from {laptop_id}: {request_id}"
+                    )
+            
+            # =================================================
             # COMMAND RESULT
             # =================================================
 
@@ -533,6 +559,78 @@ ALLOWED_COMMANDS = {
     "play_pause"
 }
 
+# ============================================================
+# FILE REQUEST HELPER
+# ============================================================
+
+async def request_file_operation(
+    laptop_id: str,
+    operation: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Send a file operation to the Windows agent and await its response."""
+
+    if operation not in {"file_search", "file_open"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file operation",
+        )
+
+    laptop = connected_laptops.get(laptop_id)
+
+    if not laptop or not laptop.get("websocket"):
+        raise HTTPException(
+            status_code=404,
+            detail="Laptop is offline",
+        )
+
+    last_seen = laptop.get("last_seen")
+
+    if (
+        last_seen is None
+        or (
+            datetime.now(timezone.utc) - last_seen
+        ).total_seconds() > HEARTBEAT_TIMEOUT
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Laptop is offline",
+        )
+
+    websocket = laptop["websocket"]
+    request_id = str(uuid.uuid4())
+    future = asyncio.get_running_loop().create_future()
+
+    pending_file_requests[request_id] = future
+
+    try:
+        await websocket.send_json({
+            "type": operation,
+            "request_id": request_id,
+            **payload,
+        })
+
+        return await asyncio.wait_for(
+            future,
+            timeout=FILE_REQUEST_TIMEOUT_SECONDS,
+        )
+
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="The Windows agent did not respond in time",
+        )
+
+    except WebSocketDisconnect:
+        raise HTTPException(
+            status_code=503,
+            detail="Laptop connection was interrupted",
+        )
+
+    finally:
+        pending_file_requests.pop(request_id, None)
+        if not future.done():
+            future.cancel()
 
 # ============================================================
 # SEND COMMAND TO LAPTOP
@@ -697,7 +795,81 @@ async def send_command(
 
 
 
+# ============================================================
+# FILE SEARCH AND OPEN ENDPOINTS
+# ============================================================
 
+class FileSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=260)
+
+
+class FileOpenRequest(BaseModel):
+    file_id: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/files/search/{laptop_id}")
+async def search_laptop_files(
+    laptop_id: str,
+    request: FileSearchRequest,
+    authorization: str | None = Header(default=None),
+):
+    check_token(authorization)
+
+    query = request.query.strip()
+    if not query:
+        raise HTTPException(
+            status_code=400,
+            detail="Search query cannot be empty",
+        )
+
+    result = await request_file_operation(
+        laptop_id,
+        "file_search",
+        {"query": query},
+    )
+
+    if result.get("type") != "file_search_result":
+        raise HTTPException(
+            status_code=502,
+            detail="Unexpected response from Windows agent",
+        )
+
+    return {
+        "success": True,
+        "query": query,
+        "results": result.get("results", []),
+    }
+
+
+@app.post("/files/open/{laptop_id}")
+async def open_laptop_file(
+    laptop_id: str,
+    request: FileOpenRequest,
+    authorization: str | None = Header(default=None),
+):
+    check_token(authorization)
+
+    result = await request_file_operation(
+        laptop_id,
+        "file_open",
+        {"file_id": request.file_id},
+    )
+
+    if result.get("type") != "file_open_result":
+        raise HTTPException(
+            status_code=502,
+            detail="Unexpected response from Windows agent",
+        )
+
+   open_result_message = result.get(
+    "result",
+    "The Windows agent returned no message.",
+)
+
+return {
+    "success": open_result_message.startswith("Opened:"),
+    "message": open_result_message,
+}
 
 # ============================================================
 # AI REQUEST
@@ -719,6 +891,18 @@ user's own connected Windows laptop.
 Your task is to understand the user's intent accurately,
 including informal language, multilingual messages, and
 natural conversational corrections.
+
+FILE SEARCH INTENT
+- If the user asks to find, search for, locate, or open a file
+  on the connected Windows laptop, return type "file_search".
+- Use the exact JSON shape:
+  {"type":"file_search","command":null,"message":"Searching for that file."}
+- Examples: "open python.py", "find my resume",
+  "search for a file called project report", "open pyhton.py".
+- For a request to open a specific file, search first. Never
+  claim that the file has opened before a result is selected.
+- Do not classify opening a file as opening an application.
+- Do not execute scripts or commands found inside files.
 
 OUTPUT CONTRACT
 - Return ONLY one valid JSON object.
@@ -1058,6 +1242,64 @@ User message:
             message = "I could not understand that request."
         message = message.strip() or "I could not understand that request."
 
+        # ====================================================
+        # FILE SEARCH
+        # ====================================================
+
+        if result_type == "file_search":
+
+            if laptop_context.get("status") != "Online":
+                return {
+                    "success": True,
+                    "type": "chat",
+                    "command": None,
+                    "reply": (
+                        "Your laptop is offline. Connect it "
+                        "before searching for files."
+                    ),
+                    "laptop": laptop_context,
+                }
+
+            try:
+                file_result = await request_file_operation(
+                    "my-laptop",
+                    "file_search",
+                    {"query": user_message},
+                )
+
+            except HTTPException as exc:
+                if exc.status_code in {404, 503, 504}:
+                    return {
+                        "success": True,
+                        "type": "chat",
+                        "command": None,
+                        "reply": exc.detail,
+                        "laptop": laptop_context,
+                    }
+                raise
+
+            if file_result.get("type") != "file_search_result":
+                raise HTTPException(
+                    status_code=502,
+                    detail="Unexpected response from Windows agent",
+                )
+
+            results = file_result.get("results", [])
+
+            return {
+                "success": True,
+                "type": "file_search",
+                "command": None,
+                "reply": (
+                    f"Found {len(results)} matching file(s). "
+                    "Select a result to open it."
+                    if results
+                    else "I couldn't find any matching files."
+                ),
+                "results": results,
+                "laptop": laptop_context,
+            }
+        
         # ====================================================
         # CHAT
         # ====================================================
