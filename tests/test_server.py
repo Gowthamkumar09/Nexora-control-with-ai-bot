@@ -104,3 +104,37 @@ def test_shutdown_rejects_invalid_confirmation_token():
     assert response.json()["detail"] == (
         "A valid, unexpired confirmation token is required"
     )
+
+
+def test_confirmation_token_cannot_be_reused_for_another_laptop():
+    from server import create_confirmation
+
+    token = create_confirmation("laptop-A", "restart")
+
+    response = client.post(
+        "/command/laptop-B",
+        headers=TEST_HEADERS,
+        json={
+            "command": "restart",
+            "confirmation_token": token,
+        },
+    )
+
+    assert response.status_code == 428
+
+
+def test_confirmation_token_cannot_be_used_for_another_command():
+    from server import create_confirmation
+
+    token = create_confirmation("my-laptop", "restart")
+
+    response = client.post(
+        "/command/my-laptop",
+        headers=TEST_HEADERS,
+        json={
+            "command": "shutdown",
+            "confirmation_token": token,
+        },
+    )
+
+    assert response.status_code == 428
