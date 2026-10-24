@@ -147,16 +147,24 @@ Restart and shutdown requests require confirmation.
 ## Project Structure
 
 ```text
-remote-control-ai/
-|
-+-- docs/
-|   +-- architecture.md
-|
-+-- .env.example
-+-- .gitignore
-+-- README.md
-+-- requirements.txt
-+-- server.py
+
+Nexora-control-with-ai-bot/
+├── .github/
+│   └── workflows/
+│       └── tests.yml
+├── docs/
+│   └── architecture.md
+├── laptop_agent/
+│   ├── agent.py
+│   └── requirements.txt
+├── tests/
+│   └── test_server.py
+├── .env.example
+├── .gitignore
+├── README.md
+├── requirements.txt
+└── server.py
+
 ```
 
 ## Environment Variables
@@ -336,3 +344,92 @@ Planned improvements include:
 - Improved monitoring dashboard
 
 **Nexora** is a personal project exploring AI-powered remote device management, cloud communication, intelligent automation, and AI-assisted system control.
+
+
+## Windows Laptop Agent Setup
+
+The Windows agent connects your laptop to the Nexora cloud backend using
+a secure WebSocket connection. Keep the agent running while you want the
+laptop to be available for monitoring and remote commands.
+
+### Requirements
+
+- Windows laptop
+- Python installed
+- Internet connection
+- Access to the Nexora Render backend
+- The same `REMOTE_TOKEN` configured in Render
+
+### 1. Open the project directory
+
+Open PowerShell and navigate to the cloned repository:
+
+```powershell
+cd "$HOME\Documents\Nexora-GitHub"
+```
+
+Adjust the path if your repository is stored elsewhere.
+
+### 2. Create and activate a virtual environment
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+If PowerShell blocks activation, you can install dependencies using
+the virtual environment's Python executable directly:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+```
+
+### 3. Install the agent dependencies
+
+```powershell
+python -m pip install -r .\laptop_agent\requirements.txt
+```
+
+### 4. Configure the authentication token
+
+The agent reads its token from:
+
+```text
+%USERPROFILE%\.nexora\remote_token.txt
+```
+
+Create the directory if it does not exist:
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.nexora"
+```
+
+Create `remote_token.txt` using a trusted local editor and enter the
+same token configured as `REMOTE_TOKEN` in the Render environment.
+
+Do not paste the token into source code, commit it to Git, or publish
+it in screenshots, logs, or documentation. The token file should remain
+excluded from version control.
+
+### 5. Start the Windows agent
+
+From the repository root, run:
+
+```powershell
+python .\laptop_agent\agent.py
+```
+
+Keep the terminal open while the agent is running.
+
+### Troubleshooting
+
+- **HTTP 403 during WebSocket connection:** Verify that the local token
+  matches the `REMOTE_TOKEN` configured in Render. Check the Render logs
+  for additional details.
+- **Missing dependency:** Activate the virtual environment and reinstall
+  `laptop_agent/requirements.txt`.
+- **Laptop appears offline:** Check the internet connection and confirm
+  that the agent is running and can reach the Render service.
+
+Never share your authentication token when requesting troubleshooting
+help.
