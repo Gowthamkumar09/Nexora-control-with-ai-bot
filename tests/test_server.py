@@ -56,3 +56,23 @@ def test_command_rejects_unknown_command():
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Command is not allowed"
+
+
+def test_laptops_rejects_invalid_token():
+    response = client.get(
+        "/laptops",
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_command_rejects_invalid_token():
+    response = client.post(
+        "/command/my-laptop",
+        headers={"Authorization": "Bearer wrong-token"},
+        json={"command": "open_chrome"},
+    )
+
+    assert response.status_code == 401
+
