@@ -438,4 +438,6 @@ help.
 
 ### Android Dashboard
 
+![Nexora Android Dashboard](docs/screenshots/android-dashboard.png)
+
 
