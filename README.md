@@ -433,3 +433,9 @@ Keep the terminal open while the agent is running.
 
 Never share your authentication token when requesting troubleshooting
 help.
+
+## Screenshots
+
+### Android Dashboard
+
+
