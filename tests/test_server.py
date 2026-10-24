@@ -138,3 +138,19 @@ def test_confirmation_token_cannot_be_used_for_another_command():
     )
 
     assert response.status_code == 428
+
+
+def test_confirmation_token_cannot_be_reused():
+    from server import consume_confirmation, create_confirmation
+
+    token = create_confirmation("my-laptop", "restart")
+
+    first_use = consume_confirmation(
+        token, "my-laptop", "restart"
+    )
+    second_use = consume_confirmation(
+        token, "my-laptop", "restart"
+    )
+
+    assert first_use is True
+    assert second_use is False
