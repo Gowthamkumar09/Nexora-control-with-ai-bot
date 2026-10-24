@@ -2,3 +2,5 @@ fastapi
 uvicorn
 websockets
 google-genai
+pytest
+httpx
