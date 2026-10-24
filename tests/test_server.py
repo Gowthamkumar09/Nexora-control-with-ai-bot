@@ -76,3 +76,31 @@ def test_command_rejects_invalid_token():
 
     assert response.status_code == 401
 
+
+def test_restart_requires_confirmation_token():
+    response = client.post(
+        "/command/my-laptop",
+        headers=TEST_HEADERS,
+        json={"command": "restart"},
+    )
+
+    assert response.status_code == 428
+    assert response.json()["detail"] == (
+        "A valid, unexpired confirmation token is required"
+    )
+
+
+def test_shutdown_rejects_invalid_confirmation_token():
+    response = client.post(
+        "/command/my-laptop",
+        headers=TEST_HEADERS,
+        json={
+            "command": "shutdown",
+            "confirmation_token": "invalid-confirmation-token",
+        },
+    )
+
+    assert response.status_code == 428
+    assert response.json()["detail"] == (
+        "A valid, unexpired confirmation token is required"
+    )
