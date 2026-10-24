@@ -179,8 +179,8 @@ The `.env.example` file contains placeholders only.
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/Gowthamkumar09/remote-control-ai.git
-cd remote-control-ai
+git clone https://github.com/Gowthamkumar09/Nexora-control-with-ai-bot.git
+cd Nexora-control-with-ai-bot
 ```
 
 ### 2. Install dependencies
